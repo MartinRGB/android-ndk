@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+//#include <windows.h>
 
 #define  LOG_TAG    "libgl2jni"
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
@@ -43,16 +44,93 @@ static void checkGlError(const char* op) {
 }
 
 auto gVertexShader =
-    "attribute vec4 vPosition;\n"
+    "attribute vec4 a_position;\n"
+//    "varying vec2 u_resolution;\n"
     "void main() {\n"
-    "  gl_Position = vPosition;\n"
+    "  gl_Position = vec4 ( a_position.x, a_position.y, 1.0, 1.0 );\n"
+//    "  u_resolution.xy = a_position.xy;\n"
     "}\n";
 
-auto gFragmentShader =
-    "precision mediump float;\n"
-    "void main() {\n"
-    "  gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);\n"
-    "}\n";
+auto gFragmentShader =""
+"#ifdef GL_ES\n"
+"precision highp float;\n"
+"#endif\n"
+"\n"
+"uniform vec2 u_resolution;\n"
+"uniform vec2 u_mouse;\n"
+"uniform float u_time;\n"
+"\n"
+"float random (in vec2 _st) {\n"
+"    return fract(sin(dot(_st.xy,\n"
+"                         vec2(12.9898,78.233)))*\n"
+"        43758.5453123);\n"
+"}\n"
+"\n"
+"// Based on Morgan McGuire @morgan3d\n"
+"// https://www.shadertoy.com/view/4dS3Wd\n"
+"float noise (in vec2 _st) {\n"
+"    vec2 i = floor(_st);\n"
+"    vec2 f = fract(_st);\n"
+"\n"
+"    // Four corners in 2D of a tile\n"
+"    float a = random(i);\n"
+"    float b = random(i + vec2(1.0, 0.0));\n"
+"    float c = random(i + vec2(0.0, 1.0));\n"
+"    float d = random(i + vec2(1.0, 1.0));\n"
+"\n"
+"    vec2 u = f * f * (3.0 - 2.0 * f);\n"
+"\n"
+"    return mix(a, b, u.x) +\n"
+"            (c - a)* u.y * (1.0 - u.x) +\n"
+"            (d - b) * u.x * u.y;\n"
+"}\n"
+"\n"
+"#define NUM_OCTAVES 8\n"
+"\n"
+"float fbm ( in vec2 _st) {\n"
+"    float v = 0.0;\n"
+"    float a = 0.5;\n"
+"    vec2 shift = vec2(100.0);\n"
+"    // Rotate to reduce axial bias\n"
+"    mat2 rot = mat2(cos(0.5), sin(0.5),\n"
+"                    -sin(0.5), cos(0.50));\n"
+"    for (int i = 0; i < NUM_OCTAVES; ++i) {\n"
+"        v += a * noise(_st);\n"
+"        _st = rot * _st * 2.0 + shift;\n"
+"        a *= 0.5;\n"
+"    }\n"
+"    return v;\n"
+"}\n"
+"\n"
+"void main() {\n"
+"    vec2 st = gl_FragCoord.xy/u_resolution.y*4.;\n"
+"    // st += st * abs(sin(u_time*0.1)*3.0);\n"
+"    vec3 color = vec3(0.0);\n"
+"\n"
+"    vec2 q = vec2(0.);\n"
+"    q.x = fbm( st + 0.00*u_time);\n"
+"    q.y = fbm( st + vec2(1.0));\n"
+"\n"
+"    vec2 r = vec2(0.);\n"
+"    r.x = fbm( st + 1.0*q + vec2(1.7,9.2)+ 0.15*u_time*10. );\n"
+"    r.y = fbm( st + 1.0*q + vec2(8.3,2.8)+ 0.126*u_time*10.);\n"
+"\n"
+"    float f = fbm(st+r);\n"
+"\n"
+"    color = mix(vec3(st.x,cos(u_time/10.),sin(u_time/10.)),\n"
+"                vec3(st.y,sin(u_time/10.),sin(u_time/10.)*cos(u_time/10.)),\n"
+"                clamp((f*f)*4.0,0.0,1.0));\n"
+"\n"
+"    color = mix(color,\n"
+"                vec3(0,0,0.164706),\n"
+"                clamp(length(q),.0,1.0));\n"
+"\n"
+"    color = mix(color,\n"
+"                vec3(0.666667,1,1),\n"
+"                clamp(length(r.x),0.0,1.0));\n"
+"\n"
+"    gl_FragColor = vec4((f*f*f+.6*f*f+.5*f)*color,1.);\n"
+"}";
 
 GLuint loadShader(GLenum shaderType, const char* pSource) {
     GLuint shader = glCreateShader(shaderType);
@@ -120,6 +198,10 @@ GLuint createProgram(const char* pVertexSource, const char* pFragmentSource) {
 
 GLuint gProgram;
 GLuint gvPositionHandle;
+GLuint guResolutionhandle;
+GLuint screenWidth;
+GLuint screenHeight;
+GLfloat guTimehandle;
 
 bool setupGraphics(int w, int h) {
     printGLString("Version", GL_VERSION);
@@ -133,26 +215,39 @@ bool setupGraphics(int w, int h) {
         LOGE("Could not create program.");
         return false;
     }
-    gvPositionHandle = glGetAttribLocation(gProgram, "vPosition");
+    gvPositionHandle = glGetAttribLocation(gProgram, "a_position");
     checkGlError("glGetAttribLocation");
-    LOGI("glGetAttribLocation(\"vPosition\") = %d\n",
+    LOGI("glGetAttribLocation(\"a_position\") = %d\n",
             gvPositionHandle);
+
+    screenWidth = w;
+    screenHeight = h;
 
     glViewport(0, 0, w, h);
     checkGlError("glViewport");
     return true;
 }
 
-const GLfloat gTriangleVertices[] = { 0.0f, 0.5f, -0.5f, -0.5f,
-        0.5f, -0.5f };
+const GLfloat VERTEX_BUF[] = {
+    1.0f, -1.0f,
+    -1.0f, -1.0f,
+    1.0f, 1.0f,
+    -1.0f, 1.0f,
+};
 
+float time = 0.f;
+//int Start = GetTickCount();
 void renderFrame() {
-    static float grey;
-    grey += 0.01f;
-    if (grey > 1.0f) {
-        grey = 0.0f;
-    }
-    glClearColor(grey, grey, grey, 1.0f);
+//    static float grey;
+//    grey += 0.01f;
+//    if (grey > 1.0f) {
+//        grey = 0.0f;
+//    }
+
+    time += 0.0166666666;
+
+
+    glClearColor(0., 0., 0., 1.0f);
     checkGlError("glClearColor");
     glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
     checkGlError("glClear");
@@ -160,11 +255,19 @@ void renderFrame() {
     glUseProgram(gProgram);
     checkGlError("glUseProgram");
 
-    glVertexAttribPointer(gvPositionHandle, 2, GL_FLOAT, GL_FALSE, 0, gTriangleVertices);
+    glVertexAttribPointer(gvPositionHandle, 2, GL_FLOAT, GL_FALSE, 8, VERTEX_BUF);
     checkGlError("glVertexAttribPointer");
     glEnableVertexAttribArray(gvPositionHandle);
     checkGlError("glEnableVertexAttribArray");
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    guResolutionhandle = glGetUniformLocation(gProgram,"u_resolution");
+    glUniform2f(guResolutionhandle,(GLfloat)screenWidth,(GLfloat)screenHeight);
+    checkGlError("glGetUniformLocation");
+
+    guTimehandle = glGetUniformLocation(gProgram,"u_time");
+    glUniform1f(guTimehandle,(GLfloat) time);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     checkGlError("glDrawArrays");
 }
 

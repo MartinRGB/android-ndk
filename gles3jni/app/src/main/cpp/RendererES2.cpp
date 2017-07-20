@@ -34,7 +34,7 @@ static const char FRAGMENT_SHADER[] =
     "precision mediump float;\n"
     "varying vec4 vColor;\n"
     "void main() {\n"
-    "    gl_FragColor = vColor;\n"
+    "    gl_FragColor = vec4(1.);\n"
     "}\n";
 
 class RendererES2: public Renderer {
