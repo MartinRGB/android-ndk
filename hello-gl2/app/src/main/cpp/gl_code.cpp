@@ -19,13 +19,12 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <time.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
-//#include <windows.h>
 
 #define  LOG_TAG    "libgl2jni"
 #define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
@@ -51,86 +50,85 @@ auto gVertexShader =
 //    "  u_resolution.xy = a_position.xy;\n"
     "}\n";
 
-auto gFragmentShader =""
+auto gFragmentShader =
 "#ifdef GL_ES\n"
-"precision highp float;\n"
-"#endif\n"
-"\n"
-"uniform vec2 u_resolution;\n"
-"uniform vec2 u_mouse;\n"
-"uniform float u_time;\n"
-"\n"
-"float random (in vec2 _st) {\n"
-"    return fract(sin(dot(_st.xy,\n"
-"                         vec2(12.9898,78.233)))*\n"
-"        43758.5453123);\n"
-"}\n"
-"\n"
-"// Based on Morgan McGuire @morgan3d\n"
-"// https://www.shadertoy.com/view/4dS3Wd\n"
-"float noise (in vec2 _st) {\n"
-"    vec2 i = floor(_st);\n"
-"    vec2 f = fract(_st);\n"
-"\n"
-"    // Four corners in 2D of a tile\n"
-"    float a = random(i);\n"
-"    float b = random(i + vec2(1.0, 0.0));\n"
-"    float c = random(i + vec2(0.0, 1.0));\n"
-"    float d = random(i + vec2(1.0, 1.0));\n"
-"\n"
-"    vec2 u = f * f * (3.0 - 2.0 * f);\n"
-"\n"
-"    return mix(a, b, u.x) +\n"
-"            (c - a)* u.y * (1.0 - u.x) +\n"
-"            (d - b) * u.x * u.y;\n"
-"}\n"
-"\n"
-"#define NUM_OCTAVES 8\n"
-"\n"
-"float fbm ( in vec2 _st) {\n"
-"    float v = 0.0;\n"
-"    float a = 0.5;\n"
-"    vec2 shift = vec2(100.0);\n"
-"    // Rotate to reduce axial bias\n"
-"    mat2 rot = mat2(cos(0.5), sin(0.5),\n"
-"                    -sin(0.5), cos(0.50));\n"
-"    for (int i = 0; i < NUM_OCTAVES; ++i) {\n"
-"        v += a * noise(_st);\n"
-"        _st = rot * _st * 2.0 + shift;\n"
-"        a *= 0.5;\n"
-"    }\n"
-"    return v;\n"
-"}\n"
-"\n"
-"void main() {\n"
-"    vec2 st = gl_FragCoord.xy/u_resolution.y*4.;\n"
-"    // st += st * abs(sin(u_time*0.1)*3.0);\n"
-"    vec3 color = vec3(0.0);\n"
-"\n"
-"    vec2 q = vec2(0.);\n"
-"    q.x = fbm( st + 0.00*u_time);\n"
-"    q.y = fbm( st + vec2(1.0));\n"
-"\n"
-"    vec2 r = vec2(0.);\n"
-"    r.x = fbm( st + 1.0*q + vec2(1.7,9.2)+ 0.15*u_time*10. );\n"
-"    r.y = fbm( st + 1.0*q + vec2(8.3,2.8)+ 0.126*u_time*10.);\n"
-"\n"
-"    float f = fbm(st+r);\n"
-"\n"
-"    color = mix(vec3(st.x,cos(u_time/10.),sin(u_time/10.)),\n"
-"                vec3(st.y,sin(u_time/10.),sin(u_time/10.)*cos(u_time/10.)),\n"
-"                clamp((f*f)*4.0,0.0,1.0));\n"
-"\n"
-"    color = mix(color,\n"
-"                vec3(0,0,0.164706),\n"
-"                clamp(length(q),.0,1.0));\n"
-"\n"
-"    color = mix(color,\n"
-"                vec3(0.666667,1,1),\n"
-"                clamp(length(r.x),0.0,1.0));\n"
-"\n"
-"    gl_FragColor = vec4((f*f*f+.6*f*f+.5*f)*color,1.);\n"
-"}";
+        "precision highp float;\n"
+        "#endif\n"
+        "\n"
+        "uniform vec2 u_resolution;\n"
+        "uniform float u_time;\n"
+        "//2\n"
+        "#define iterations 17\n"
+        "#define formuparam 0.53\n"
+        "\n"
+        "#define volsteps 10\n"
+        "#define stepsize 0.1\n"
+        "\n"
+        "#define zoom   0.800\n"
+        "#define tile   0.850\n"
+        "#define speed  0.050\n"
+        "\n"
+        "#define brightness 0.0015\n"
+        "#define darkmatter 0.300\n"
+        "#define distfading 0.730\n"
+        "#define saturation 0.850\n"
+        "\n"
+        "\n"
+        "vec3 mainImage(in vec2 fragCoord )\n"
+        "{\n"
+        "    //get coords and direction\n"
+        "    vec2 uv=fragCoord.xy/u_resolution.xy-.5;\n"
+        "    uv.y*=u_resolution.y/u_resolution.x;\n"
+        "    vec3 dir=vec3(uv*zoom,1.);\n"
+        "    float time=u_time*speed+.25;\n"
+        "\n"
+        "    //mouse rotation\n"
+        "    float a1=.5+(u_time)*10./u_resolution.x/100.;\n"
+        "    float a2=.8+(u_time)*10./u_resolution.y/100.;\n"
+        "    mat2 rot1=mat2(cos(a1),sin(a1),-sin(a1),cos(a1));\n"
+        "    mat2 rot2=mat2(cos(a2),sin(a2),-sin(a2),cos(a2));\n"
+        "    dir.xz*=rot1;\n"
+        "    dir.xy*=rot2;\n"
+        "    vec3 from=vec3(1.,0.5,0.5);\n"
+        "    from+=vec3(time*2.,time,-2.);\n"
+        "    from.xz*=rot1;\n"
+        "    from.xy*=rot2;\n"
+        "\n"
+        "    //volumetric rendering\n"
+        "    float s=0.1,fade=1.;\n"
+        "    vec3 v=vec3(0.);\n"
+        "    for (int r=0; r<volsteps; r++) {\n"
+        "        vec3 p=from+s*dir*.5;\n"
+        "        p = abs(vec3(tile)-mod(p,vec3(tile*2.))); // tiling fold\n"
+        "        float pa,a=pa=0.;\n"
+        "        for (int i=0; i<iterations; i++) {\n"
+        "            p=abs(p)/dot(p,p)-formuparam; // the magic formula\n"
+        "            a+=abs(length(p)-pa); // absolute sum of average change\n"
+        "            pa=length(p);\n"
+        "        }\n"
+        "        float dm=max(0.,darkmatter-a*a*.001); //dark matter\n"
+        "        a*=a*a; // add contrast\n"
+        "        if (r>6) fade*=1.-dm; // dark matter, don't render near\n"
+        "        //v+=vec3(dm,dm*.5,0.);\n"
+        "        v+=fade;\n"
+        "        v+=vec3(s/2.,s*s,s*s*s*s*4.9)*a*brightness*fade; // coloring based on distance\n"
+        "        fade*=distfading; // distance fading\n"
+        "        s+=stepsize;\n"
+        "    }\n"
+        "    v=mix(vec3(length(v)),v,saturation); //color adjust\n"
+        "    //fragColor = vec4(v*.01,1.);\n"
+        "\n"
+        "    return v*0.01;\n"
+        "}\n"
+        "\n"
+        "void main() {\n"
+        "    //vec2 st = gl_FragCoord.xy/u_resolution;\n"
+        "    //gl_FragColor = vec4(st.x,st.y,0.0,1.0);\n"
+        "\n"
+        "    gl_FragColor = vec4(mainImage(gl_FragCoord.xy),1.);\n"
+        "\n"
+        "}"
+;
 
 GLuint loadShader(GLenum shaderType, const char* pSource) {
     GLuint shader = glCreateShader(shaderType);
@@ -235,17 +233,10 @@ const GLfloat VERTEX_BUF[] = {
     -1.0f, 1.0f,
 };
 
-float time = 0.f;
-//int Start = GetTickCount();
+float mtime = 0.f;
+
 void renderFrame() {
-//    static float grey;
-//    grey += 0.01f;
-//    if (grey > 1.0f) {
-//        grey = 0.0f;
-//    }
-
-    time += 0.0166666666;
-
+    mtime += 0.0166666666;
 
     glClearColor(0., 0., 0., 1.0f);
     checkGlError("glClearColor");
@@ -265,11 +256,16 @@ void renderFrame() {
     checkGlError("glGetUniformLocation");
 
     guTimehandle = glGetUniformLocation(gProgram,"u_time");
-    glUniform1f(guTimehandle,(GLfloat) time);
+    glUniform1f(guTimehandle,(GLfloat) mtime);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     checkGlError("glDrawArrays");
+
+
+
 }
+
+
 
 extern "C" {
     JNIEXPORT void JNICALL Java_com_android_gl2jni_GL2JNILib_init(JNIEnv * env, jobject obj,  jint width, jint height);
@@ -281,7 +277,11 @@ JNIEXPORT void JNICALL Java_com_android_gl2jni_GL2JNILib_init(JNIEnv * env, jobj
     setupGraphics(width, height);
 }
 
+
+
 JNIEXPORT void JNICALL Java_com_android_gl2jni_GL2JNILib_step(JNIEnv * env, jobject obj)
 {
+
     renderFrame();
+
 }
