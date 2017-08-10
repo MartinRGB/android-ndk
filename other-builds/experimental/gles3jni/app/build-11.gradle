@@ -11,11 +11,11 @@ model {
 
         defaultConfig {
             applicationId = 'com.android.gles3jni'
-            minSdkVersion.apiLevel    = 11
+            minSdkVersion.apiLevel    = 14
             targetSdkVersion.apiLevel = 23
         }
         ndk {
-            platformVersion =  21
+            platformVersion =  14
             moduleName  = 'gles3jni'
             toolchain = 'clang'
             stl         = 'gnustl_static'
